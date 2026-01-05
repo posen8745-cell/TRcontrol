@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>T字路口｜單線主線1（直行/轉彎分離｜Cycle 約 120 秒）</title>
+  <title>T字路口｜單線主線1（直行/轉彎分離＋排隊跟車）</title>
   <style>
     :root{
       --bg:#0b1220;
@@ -147,8 +147,9 @@
 
     <div class="card panel">
       <h1>
-        ✅ 單線主線1 最終模型（避免「轉彎等候卡死直行」）<br/>
+        ✅ 單線主線1 最終模型（避免「轉彎等候卡死直行」＋加入排隊跟車）<br/>
         主線1：<b>直行相位</b> + <b>轉彎相位（往下）</b> 分離（單線必須這樣才合理）。<br/>
+        主線1：已加入 <b>車跟車排隊</b> → 直行車不會越過等候轉彎車。<br/>
         主線2：左右轉同時（兩車道：左轉專用＋右轉專用）。<br/>
         行人：可勾選斑馬線，且每條保證 <b>WALK + CLEAR ≥ 20 秒</b>（預設 24 秒）。<br/>
         行人 CLEAR：允許「不衝突車流」低速通行（較像實際）。
@@ -163,7 +164,7 @@
 
       <div class="row">
         <label>主線1 直行綠（M1_SG）</label>
-        <input type="number" id="tM1SG" min="10" max="120" value="35" />
+        <input type="number" id="tM1SG" min="10" max="120" value="45" />
       </div>
       <div class="row">
         <label>主線1 轉彎綠（M1_TG）</label>
@@ -289,7 +290,7 @@
     if (!cfg) return;
 
     const t = cfg.timing || {};
-    // 向下相容：若你舊 config 用 M1_G，也可當作 M1_SG
+    // 向下相容：若舊 config 用 M1_G，也可當作 M1_SG
     if (t.M1_SG != null) ui.tM1SG.value = t.M1_SG;
     else if (t.M1_G != null) ui.tM1SG.value = t.M1_G;
 
@@ -491,7 +492,7 @@
     return pedSteps[pedIndex] || { key:'NONE_CLEAR', dur: 0 };
   }
 
-  // ===== Signals (燈色維持簡化：主線1 綠/黃由相位決定) =====
+  // ===== Signals =====
   function signals(){
     const all = {
       m1: SIG.RED,
@@ -599,7 +600,7 @@
         w: CAR_W,
         h: CAR_H,
         turned: false,
-        outLane: 0, // 單線主線1：進出口不再假裝有兩道可繞行，統一用 0
+        outLane: 0, // 單線：固定
       });
     } else if (r < 0.84){
       // right -> left : straight or left-turn down
@@ -617,7 +618,7 @@
         outLane: 0,
       });
     } else {
-      // M2 incoming: lane0 left-only, lane1 right-only (保留兩車道設定)
+      // M2 incoming: lane0 left-only, lane1 right-only
       const laneIdx = (Math.random() < 0.58) ? 1 : 0;
       const route = (laneIdx === 0) ? 'toLeft' : 'toRight';
       cars.push({
@@ -637,35 +638,29 @@
 
   // ===== 핵심：movement permission (單線主線1：直行/轉彎分離) =====
   function allowedBySignal(car, sig, g){
-    // 行人相位：依 CLEAR/WALK 規則
     if (phase === PH.PSEQ){
       return pedAllowsCar(car, sig);
     }
 
-    // 主線1（左右向）
+    // 主線1
     if (car.kind === 'M1L' || car.kind === 'M1R'){
-      // 黃燈只允許已過停止線的車清空
       if (sig.m1 === SIG.YELLOW) return pastStop(car, g);
       if (sig.m1 !== SIG.GREEN) return false;
 
-      // 綠燈時依相位決定放行類型
-      // M1S_G：只放直行
       if (phase === PH.M1S_G){
-        if (pastStop(car, g)) return true; // 已進口就讓它走完
+        if (pastStop(car, g)) return true;
         return car.route === 'straight';
       }
 
-      // M1T_G：只放往下轉彎（左來右轉、右來左轉）
       if (phase === PH.M1T_G){
         if (pastStop(car, g)) return true;
         return car.route === 'down';
       }
 
-      // 其他（全紅/緩衝）不放
       return false;
     }
 
-    // 主線2（下方）
+    // 主線2
     if (car.kind === 'M2'){
       if (sig.m2 === SIG.GREEN) return true;
       if (sig.m2 === SIG.YELLOW) return pastStop(car, g);
@@ -675,32 +670,102 @@
     return false;
   }
 
+  // ===== 車跟車（單線排隊）=====
+  const SAFE_GAP = 10; // 車距(px)
+
+  function laneKey(car){
+    if (car.kind === 'M1L') return 'M1L';
+    if (car.kind === 'M1R') return 'M1R';
+    if (car.kind === 'M2') return `M2_${car.laneIdx}`;
+    return null;
+  }
+
+  function progress(car){
+    if (car.kind === 'M1L') return car.x;   // 往右：x 越大越前
+    if (car.kind === 'M1R') return -car.x;  // 往左：-x 越大越前
+    if (car.kind === 'M2')  return -car.y;  // 往上：-y 越大越前
+    return 0;
+  }
+
+  function frontPos(car){
+    if (car.kind === 'M1L') return car.x + car.w/2;
+    if (car.kind === 'M1R') return car.x - car.w/2;
+    if (car.kind === 'M2')  return car.y - car.h/2;
+    return 0;
+  }
+
+  function backPos(car){
+    if (car.kind === 'M1L') return car.x - car.w/2;
+    if (car.kind === 'M1R') return car.x + car.w/2;
+    if (car.kind === 'M2')  return car.y + car.h/2;
+    return 0;
+  }
+
   function updateCars(dt, sig, g){
     const slowFactor = (phase === PH.PSEQ && sig.pedMode === 'CLEAR') ? 0.45 : 1.0;
 
+    // 先算「燈號/停止線」是否要停
     for (const car of cars){
-      const needStop = approachingStop(car, g) && !pastStop(car, g) && !allowedBySignal(car, sig, g);
+      car.__needStop =
+        approachingStop(car, g) &&
+        !pastStop(car, g) &&
+        !allowedBySignal(car, sig, g);
+    }
 
-      if (!needStop){
+    // 再做「同車道排隊」：後車不得貼近前車（前車就是障礙）
+    const lanes = new Map();
+    for (const car of cars){
+      const key = laneKey(car);
+      if (!key) continue;
+
+      // 只管還在「原行進方向」的車；已轉向的不參與本車道排隊
+      if (car.kind === 'M1L' && Math.abs(car.vx) <= 0.0001) continue;
+      if (car.kind === 'M1R' && Math.abs(car.vx) <= 0.0001) continue;
+      if (car.kind === 'M2'  && Math.abs(car.vy) <= 0.0001) continue;
+
+      if (!lanes.has(key)) lanes.set(key, []);
+      lanes.get(key).push(car);
+    }
+
+    for (const arr of lanes.values()){
+      // 由前到後排序
+      arr.sort((a,b) => progress(b) - progress(a));
+
+      for (let i=1; i<arr.length; i++){
+        const leader = arr[i-1];
+        const follower = arr[i];
+
+        // follower 車頭到 leader 車尾距離
+        const gap = backPos(leader) - frontPos(follower);
+
+        if (gap < SAFE_GAP){
+          follower.__needStop = true; // 強制停：不管是不是綠燈
+        }
+      }
+    }
+
+    // 最後依 __needStop 來移動
+    for (const car of cars){
+      if (!car.__needStop){
         car.x += car.vx * dt * slowFactor;
         car.y += car.vy * dt * slowFactor;
       }
 
       // Turning behavior
       if (!car.turned){
-        // M1 turn down into stem OUT lane
+        // 主線1 往下轉
         if ((car.kind === 'M1L' || car.kind === 'M1R') && car.route === 'down'){
           const turnX = g.road.x;
           if ((car.kind==='M1L' && car.x >= turnX) || (car.kind==='M1R' && car.x <= turnX)){
             car.turned = true;
             const sp = Math.abs(car.vx);
             car.vx = 0; car.vy = sp; // down
-            car.x = g.lane.stem_out_x[0]; // 單線：固定用 0
+            car.x = g.lane.stem_out_x[0]; // 單線：固定
             car.w = CAR_H; car.h = CAR_W;
           }
         }
 
-        // M2 turn into mainline
+        // 主線2 轉入主線1
         if (car.kind === 'M2'){
           if (car.y <= g.road.y + 10){
             car.turned = true;
@@ -814,8 +879,8 @@
     // labels
     ctx.fillStyle = 'rgba(232,238,252,0.78)';
     ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
-    ctx.fillText('主線1（左來）直行 / 右轉(往下) 〔單線：相位分離〕', 14, g.road.y + 60);
-    ctx.fillText('主線1（右來）直行 / 左轉(往下) 〔單線：相位分離〕', g.W-340, g.road.y - 52);
+    ctx.fillText('主線1（左來）直行 / 右轉(往下)〔單線相位分離＋排隊〕', 14, g.road.y + 60);
+    ctx.fillText('主線1（右來）直行 / 左轉(往下)〔單線相位分離＋排隊〕', g.W-370, g.road.y - 52);
     ctx.fillText('主線2（下方進口）左右轉同時', g.road.x - 98, g.H-18);
   }
 
