@@ -1,13 +1,9 @@
 {
-  "intersection_id": "I-001",
-  "phases": [
-    { "id": "M1_G", "duration_s": 45 },
-    { "id": "M1_Y", "duration_s": 3 },
-    { "id": "AR_1", "duration_s": 2 },
-    { "id": "M2_G", "duration_s": 30 },
-    { "id": "M2_Y", "duration_s": 3 },
-    { "id": "AR_2", "duration_s": 2 },
-    { "id": "PED_WALK", "duration_s": 14 },
-    { "id": "PED_CLEAR", "duration_s": 10 }
-  ]
+  "timing": { "M1_G": 45, "M1_Y": 3, "M2_G": 30, "M2_Y": 3, "AR": 2 },
+  "spawn": 0.75,
+  "ped": {
+    "LEFT":   { "enabled": false, "WALK": 14, "CLEAR": 10 },
+    "RIGHT":  { "enabled": false, "WALK": 14, "CLEAR": 10 },
+    "BOTTOM": { "enabled": true,  "WALK": 14, "CLEAR": 10 }
+  }
 }
