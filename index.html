@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>T字路口｜單線主線1（直行/轉彎分離＋排隊跟車）</title>
+  <title>T字路口｜單線主線1（直行/轉彎分離＋排隊跟車修正版）</title>
   <style>
     :root{
       --bg:#0b1220;
@@ -147,12 +147,11 @@
 
     <div class="card panel">
       <h1>
-        ✅ 單線主線1 最終模型（避免「轉彎等候卡死直行」＋加入排隊跟車）<br/>
-        主線1：<b>直行相位</b> + <b>轉彎相位（往下）</b> 分離（單線必須這樣才合理）。<br/>
-        主線1：已加入 <b>車跟車排隊</b> → 直行車不會越過等候轉彎車。<br/>
+        ✅ 單線主線1（直行/轉彎分離）＋✅ 排隊跟車（已修正右來車道穿越）<br/>
+        主線1：直行相位 + 轉彎相位（往下）分離（單線必須這樣才合理）。<br/>
+        排隊：使用「沿行進方向座標 s」→ 不論往左/往右/往上，都不會穿越前車。<br/>
         主線2：左右轉同時（兩車道：左轉專用＋右轉專用）。<br/>
-        行人：可勾選斑馬線，且每條保證 <b>WALK + CLEAR ≥ 20 秒</b>（預設 24 秒）。<br/>
-        行人 CLEAR：允許「不衝突車流」低速通行（較像實際）。
+        行人：可勾選斑馬線，且每條保證 <b>WALK + CLEAR ≥ 20 秒</b>（預設 24 秒）。
       </h1>
 
       <div class="pill">
@@ -197,8 +196,7 @@
       <div class="subcard">
         <div class="tiny">
           行人序列：左→右→下（只跑你勾選的）。每條會跑 <code>WALK</code> 再跑 <code>CLEAR</code>。<br/>
-          你要求「至少 20 秒」：用 <code>WALK + CLEAR</code> 保證（預設 14+10=24）。<br/>
-          CLEAR 期間：允許不衝突車流低速通行（比全紅更像現實）。
+          CLEAR 期間：允許不衝突車流低速通行（較像實際）。
         </div>
 
         <div class="grid2">
@@ -228,8 +226,7 @@
         </div>
 
         <div class="note">
-          ⚠ 若同時勾 2~3 條斑馬線：行人序列總時間會增加（因為逐條放行）。<br/>
-          ✅ 你可用秒數與勾選組合，去對應「尖峰行人需求」。
+          ✅ 已加入「同車道排隊」：直行車不可能越過等候的轉彎車（含右來車道）。
         </div>
       </div>
 
@@ -290,10 +287,8 @@
     if (!cfg) return;
 
     const t = cfg.timing || {};
-    // 向下相容：若舊 config 用 M1_G，也可當作 M1_SG
     if (t.M1_SG != null) ui.tM1SG.value = t.M1_SG;
     else if (t.M1_G != null) ui.tM1SG.value = t.M1_G;
-
     if (t.M1_TG != null) ui.tM1TG.value = t.M1_TG;
 
     if (t.M1_Y != null) ui.tM1Y.value = t.M1_Y;
@@ -403,7 +398,7 @@
     return steps;
   }
 
-  // ===== Phases (主線1 單線：直行/轉彎分離) =====
+  // ===== Phases =====
   const PH = {
     M1S_G:'M1S_G', // 主線1 直行綠（只放直行）
     M1S_Y:'M1S_Y',
@@ -526,11 +521,9 @@
       return s;
     }
 
-    // 主線1
     if (phase === PH.M1S_G || phase === PH.M1T_G) return { ...all, m1: SIG.GREEN };
     if (phase === PH.M1S_Y || phase === PH.M1T_Y) return { ...all, m1: SIG.YELLOW };
 
-    // 主線2
     if (phase === PH.M2_G)  return { ...all, m2: SIG.GREEN };
     if (phase === PH.M2_Y)  return { ...all, m2: SIG.YELLOW };
 
@@ -546,14 +539,14 @@
   function stopLine(car, g){
     if (car.kind === 'M1L') return g.stop.m1_left;
     if (car.kind === 'M1R') return g.stop.m1_right;
-    return g.stop.m2_in;
+    return g.stop.m2_in; // M2
   }
 
   function pastStop(car, g){
     const s = stopLine(car, g);
-    if (car.kind === 'M1L') return car.x > s;
-    if (car.kind === 'M1R') return car.x < s;
-    return car.y < s;
+    if (car.kind === 'M1L') return car.x > s;  // 往右
+    if (car.kind === 'M1R') return car.x < s;  // 往左
+    return car.y < s;                          // M2 往上
   }
 
   function approachingStop(car, g){
@@ -579,7 +572,6 @@
     return true;
   }
 
-  // Spawn cars
   function spawnCar(g){
     const p = Number(ui.spawn.value);
     if (Math.random() > p) return;
@@ -588,37 +580,28 @@
     const sp = rnd(95, 145);
 
     if (r < 0.42){
-      // left -> right : straight or right-turn down
       const turnDown = (Math.random() < 0.30);
       cars.push({
         kind:'M1L',
         route: turnDown ? 'down' : 'straight',
         x: -80,
         y: g.lane.m1_east_y,
-        vx: sp,
-        vy: 0,
-        w: CAR_W,
-        h: CAR_H,
+        vx: sp, vy: 0,
+        w: CAR_W, h: CAR_H,
         turned: false,
-        outLane: 0, // 單線：固定
       });
     } else if (r < 0.84){
-      // right -> left : straight or left-turn down
       const turnDown = (Math.random() < 0.55);
       cars.push({
         kind:'M1R',
         route: turnDown ? 'down' : 'straight',
         x: g.W + 80,
         y: g.lane.m1_west_y,
-        vx: -sp,
-        vy: 0,
-        w: CAR_W,
-        h: CAR_H,
+        vx: -sp, vy: 0,
+        w: CAR_W, h: CAR_H,
         turned: false,
-        outLane: 0,
       });
     } else {
-      // M2 incoming: lane0 left-only, lane1 right-only
       const laneIdx = (Math.random() < 0.58) ? 1 : 0;
       const route = (laneIdx === 0) ? 'toLeft' : 'toRight';
       cars.push({
@@ -627,16 +610,13 @@
         route,
         x: g.lane.stem_in_x[laneIdx],
         y: g.H + 90,
-        vx: 0,
-        vy: -sp,
-        w: CAR_H,
-        h: CAR_W,
+        vx: 0, vy: -sp,
+        w: CAR_H, h: CAR_W,
         turned: false,
       });
     }
   }
 
-  // ===== 핵심：movement permission (單線主線1：直行/轉彎分離) =====
   function allowedBySignal(car, sig, g){
     if (phase === PH.PSEQ){
       return pedAllowsCar(car, sig);
@@ -651,12 +631,10 @@
         if (pastStop(car, g)) return true;
         return car.route === 'straight';
       }
-
       if (phase === PH.M1T_G){
         if (pastStop(car, g)) return true;
         return car.route === 'down';
       }
-
       return false;
     }
 
@@ -670,41 +648,38 @@
     return false;
   }
 
-  // ===== 車跟車（單線排隊）=====
-  const SAFE_GAP = 10; // 車距(px)
+  // ===== 排隊跟車（修正版：用沿行進方向座標 s）=====
+  const SAFE_GAP = 10; // px
 
   function laneKey(car){
+    // 注意：M2 轉入主線1後，我們會把 kind 改成 M1L/M1R，這樣自動納入主線1排隊
     if (car.kind === 'M1L') return 'M1L';
     if (car.kind === 'M1R') return 'M1R';
-    if (car.kind === 'M2') return `M2_${car.laneIdx}`;
+    if (car.kind === 'M2')  return `M2_${car.laneIdx}`;
     return null;
   }
 
-  function progress(car){
-    if (car.kind === 'M1L') return car.x;   // 往右：x 越大越前
-    if (car.kind === 'M1R') return -car.x;  // 往左：-x 越大越前
-    if (car.kind === 'M2')  return -car.y;  // 往上：-y 越大越前
+  function sCoord(car){
+    // 沿行進方向座標 s：越大越前面
+    if (car.kind === 'M1L') return car.x;     // 往右
+    if (car.kind === 'M1R') return -car.x;    // 往左
+    if (car.kind === 'M2')  return -car.y;    // 往上
     return 0;
   }
 
-  function frontPos(car){
-    if (car.kind === 'M1L') return car.x + car.w/2;
-    if (car.kind === 'M1R') return car.x - car.w/2;
-    if (car.kind === 'M2')  return car.y - car.h/2;
-    return 0;
+  function lenAlong(car){
+    // 沿行進方向的長度
+    if (car.kind === 'M2') return car.h;      // 往上時 h 是沿行進方向
+    return car.w;                             // 往左/右時 w 是沿行進方向
   }
 
-  function backPos(car){
-    if (car.kind === 'M1L') return car.x - car.w/2;
-    if (car.kind === 'M1R') return car.x + car.w/2;
-    if (car.kind === 'M2')  return car.y + car.h/2;
-    return 0;
-  }
+  function frontS(car){ return sCoord(car) + lenAlong(car)/2; }
+  function backS(car){  return sCoord(car) - lenAlong(car)/2; }
 
   function updateCars(dt, sig, g){
     const slowFactor = (phase === PH.PSEQ && sig.pedMode === 'CLEAR') ? 0.45 : 1.0;
 
-    // 先算「燈號/停止線」是否要停
+    // 1) 先算「燈號/停止線」是否要停
     for (const car of cars){
       car.__needStop =
         approachingStop(car, g) &&
@@ -712,46 +687,40 @@
         !allowedBySignal(car, sig, g);
     }
 
-    // 再做「同車道排隊」：後車不得貼近前車（前車就是障礙）
+    // 2) 再做「同車道排隊」：後車不得貼近前車（方向用 s 統一）
     const lanes = new Map();
     for (const car of cars){
       const key = laneKey(car);
       if (!key) continue;
 
-      // 只管還在「原行進方向」的車；已轉向的不參與本車道排隊
-      if (car.kind === 'M1L' && Math.abs(car.vx) <= 0.0001) continue;
-      if (car.kind === 'M1R' && Math.abs(car.vx) <= 0.0001) continue;
-      if (car.kind === 'M2'  && Math.abs(car.vy) <= 0.0001) continue;
+      // 只管「還在原方向跑」的車（已轉向會改變 vx/vy）
+      if ((car.kind === 'M1L' || car.kind === 'M1R') && Math.abs(car.vx) <= 0.0001) continue;
+      if (car.kind === 'M2' && Math.abs(car.vy) <= 0.0001) continue;
 
       if (!lanes.has(key)) lanes.set(key, []);
       lanes.get(key).push(car);
     }
 
     for (const arr of lanes.values()){
-      // 由前到後排序
-      arr.sort((a,b) => progress(b) - progress(a));
-
+      arr.sort((a,b) => sCoord(b) - sCoord(a)); // s 大在前
       for (let i=1; i<arr.length; i++){
         const leader = arr[i-1];
         const follower = arr[i];
-
-        // follower 車頭到 leader 車尾距離
-        const gap = backPos(leader) - frontPos(follower);
-
+        const gap = backS(leader) - frontS(follower);
         if (gap < SAFE_GAP){
-          follower.__needStop = true; // 強制停：不管是不是綠燈
+          follower.__needStop = true; // 強制停：就算綠燈也不能穿
         }
       }
     }
 
-    // 最後依 __needStop 來移動
+    // 3) 依 __needStop 移動
     for (const car of cars){
       if (!car.__needStop){
         car.x += car.vx * dt * slowFactor;
         car.y += car.vy * dt * slowFactor;
       }
 
-      // Turning behavior
+      // 4) 轉彎行為
       if (!car.turned){
         // 主線1 往下轉
         if ((car.kind === 'M1L' || car.kind === 'M1R') && car.route === 'down'){
@@ -759,13 +728,13 @@
           if ((car.kind==='M1L' && car.x >= turnX) || (car.kind==='M1R' && car.x <= turnX)){
             car.turned = true;
             const sp = Math.abs(car.vx);
-            car.vx = 0; car.vy = sp; // down
-            car.x = g.lane.stem_out_x[0]; // 單線：固定
+            car.vx = 0; car.vy = sp;
+            car.x = g.lane.stem_out_x[0];
             car.w = CAR_H; car.h = CAR_W;
           }
         }
 
-        // 主線2 轉入主線1
+        // 主線2 轉入主線1（重要：轉入後改 kind，才能進主線1 排隊！）
         if (car.kind === 'M2'){
           if (car.y <= g.road.y + 10){
             car.turned = true;
@@ -774,9 +743,15 @@
             car.w = CAR_W; car.h = CAR_H;
 
             if (car.route === 'toLeft'){
+              // 往左走 → 變成 M1R
+              car.kind = 'M1R';
+              car.route = 'straight';
               car.vx = -sp;
               car.y = g.lane.m1_west_y;
             } else {
+              // 往右走 → 變成 M1L
+              car.kind = 'M1L';
+              car.route = 'straight';
               car.vx = sp;
               car.y = g.lane.m1_east_y;
             }
@@ -785,14 +760,14 @@
       }
     }
 
-    // cleanup
+    // 5) cleanup
     for (let i=cars.length-1; i>=0; i--){
       const c = cars[i];
       if (c.x < -320 || c.x > g.W+320 || c.y < -320 || c.y > g.H+320) cars.splice(i,1);
     }
   }
 
-  // Drawing helpers
+  // ===== Drawing =====
   function roundRect(x,y,w,h,r){
     ctx.beginPath();
     ctx.moveTo(x+r, y);
@@ -824,23 +799,19 @@
   function drawRoad(g){
     ctx.clearRect(0,0,g.W,g.H);
 
-    // asphalt
     ctx.fillStyle = 'rgba(255,255,255,0.03)';
     ctx.fillRect(0, g.road.y-g.road.h/2, g.W, g.road.h);
     ctx.fillRect(g.road.x-g.road.w/2, g.road.y, g.road.w, g.H-g.road.y);
 
-    // lane lines
     ctx.strokeStyle='rgba(255,255,255,0.16)'; ctx.lineWidth=2;
     dashed(0, g.road.y, g.W, g.road.y);
 
-    // vertical stem divider
     ctx.strokeStyle='rgba(255,255,255,0.13)'; ctx.lineWidth=2;
     ctx.beginPath();
     ctx.moveTo(g.road.x, g.road.y);
     ctx.lineTo(g.road.x, g.H);
     ctx.stroke();
 
-    // inner lane separators (stem)
     for (const x of [g.lane.stem_out_x[1], g.lane.stem_in_x[0]]){
       ctx.beginPath();
       ctx.moveTo(x, g.road.y+8);
@@ -848,17 +819,14 @@
       ctx.stroke();
     }
 
-    // edges
     ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=3;
     ctx.strokeRect(0, g.road.y-g.road.h/2, g.W, g.road.h);
     ctx.strokeRect(g.road.x-g.road.w/2, g.road.y, g.road.w, g.H-g.road.y);
 
-    // zebra crossings
     zebra(g.xwalk.left.x, g.xwalk.left.y, g.xwalk.left.w, g.xwalk.left.h, 'vertical');
     zebra(g.xwalk.right.x, g.xwalk.right.y, g.xwalk.right.w, g.xwalk.right.h, 'vertical');
     zebra(g.xwalk.bottom.x, g.xwalk.bottom.y, g.xwalk.bottom.w, g.xwalk.bottom.h, 'horizontal');
 
-    // stop lines
     ctx.strokeStyle='rgba(255,255,255,0.60)'; ctx.lineWidth=4;
 
     ctx.beginPath();
@@ -876,11 +844,10 @@
     ctx.lineTo(g.road.x+g.road.w/2-6, g.stop.m2_in);
     ctx.stroke();
 
-    // labels
     ctx.fillStyle = 'rgba(232,238,252,0.78)';
     ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
-    ctx.fillText('主線1（左來）直行 / 右轉(往下)〔單線相位分離＋排隊〕', 14, g.road.y + 60);
-    ctx.fillText('主線1（右來）直行 / 左轉(往下)〔單線相位分離＋排隊〕', g.W-370, g.road.y - 52);
+    ctx.fillText('主線1（左來）直行/右轉(往下)〔分離＋排隊〕', 14, g.road.y + 60);
+    ctx.fillText('主線1（右來）直行/左轉(往下)〔分離＋排隊〕', g.W-330, g.road.y - 52);
     ctx.fillText('主線2（下方進口）左右轉同時', g.road.x - 98, g.H-18);
   }
 
@@ -969,6 +936,7 @@
         else if (car.vy > 0) ctx.rotate(Math.PI/2);
       }
 
+      // color
       if (car.kind === 'M2') ctx.fillStyle = 'rgba(170,160,255,0.95)';
       else if (car.route === 'down') ctx.fillStyle = 'rgba(100,240,200,0.95)';
       else ctx.fillStyle = 'rgba(120,200,255,0.95)';
