@@ -503,11 +503,21 @@
       cars.push({ kind:'M1R', route, x:g.W+70, y:g.lane.m1_west_y, vx:-speed, vy:0, w:CAR_W, h:CAR_H, turned:false, outLane: (Math.random()<0.5?0:1) });
     } else {
       // stem incoming (right side 2 lanes, upward)
+      // ✅ 1左 + 1右（固定用途）
+      // laneIdx 0 = 左轉專用
+      // laneIdx 1 = 右轉專用
       const laneIdx = (Math.random() < 0.5) ? 0 : 1;
-      const route = (Math.random() < 0.5) ? 'toLeft' : 'toRight'; // into mainline1
+      const route = (laneIdx === 0) ? 'toLeft' : 'toRight';
+
       cars.push({
         kind:'STEM', laneIdx, route,
         x:g.lane.stem_in_x[laneIdx], y:g.H+80,
+        vx:0, vy:-rnd(90, 135),
+        w:CAR_H, h:CAR_W,
+        turned:false
+      });
+    }
+
         vx:0, vy:-speed,
         w:CAR_H, h:CAR_W,
         turned:false
