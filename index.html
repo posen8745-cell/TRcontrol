@@ -268,6 +268,48 @@
 
   const SIG = { RED:'RED', YELLOW:'YELLOW', GREEN:'GREEN' };
 
+  // ===== JSON Config Loader (新增) =====
+  let CONFIG = null;
+
+  async function loadConfig(){
+    const res = await fetch('./config/intersection_I001.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Config load failed: HTTP ${res.status} ${res.statusText}`);
+    CONFIG = await res.json();
+    console.log('✅ CONFIG loaded:', CONFIG);
+    return CONFIG;
+  }
+
+  function applyConfigToUI(cfg){
+    if (!cfg) return;
+
+    // timing -> inputs
+    const t = cfg.timing || {};
+    if (t.M1_G != null) ui.tM1G.value = t.M1_G;
+    if (t.M1_Y != null) ui.tM1Y.value = t.M1_Y;
+    if (t.M2_G != null) ui.tM2G.value = t.M2_G;
+    if (t.M2_Y != null) ui.tM2Y.value = t.M2_Y;
+    if (t.AR   != null) ui.tAR.value  = t.AR;
+
+    // spawn
+    if (cfg.spawn != null) ui.spawn.value = cfg.spawn;
+
+    // pedestrians
+    const p = cfg.ped || {};
+    const setPed = (key, onEl, wEl, cEl) => {
+      if (!p[key]) return;
+      if (p[key].enabled != null) onEl.checked = !!p[key].enabled;
+      if (p[key].WALK    != null) wEl.value = p[key].WALK;
+      if (p[key].CLEAR   != null) cEl.value = p[key].CLEAR;
+    };
+
+    setPed('LEFT',   ui.pLeftOn,   ui.pLeftWalk,   ui.pLeftClr);
+    setPed('RIGHT',  ui.pRightOn,  ui.pRightWalk,  ui.pRightClr);
+    setPed('BOTTOM', ui.pBottomOn, ui.pBottomWalk, ui.pBottomClr);
+
+    // 套用後讓 remaining/pedSteps 合理化（會用到後面的 softApply）
+    // （先留著，等 softApply 定義後會被呼叫）
+  }
+
   function resizeCanvasToCSS(){
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     const rect = canvas.getBoundingClientRect();
@@ -913,6 +955,12 @@
     }
   }
 
+  // （新增）applyConfigToUI 需要 softApply，現在 softApply 已經定義了
+  function applyConfigAndNormalize(cfg){
+    applyConfigToUI(cfg);
+    softApply();
+  }
+
   for (const el of [
     ui.tM1G,ui.tM1Y,ui.tM2G,ui.tM2Y,ui.tAR,ui.spawn,
     ui.pLeftOn,ui.pRightOn,ui.pBottomOn,
@@ -953,12 +1001,21 @@
     requestAnimationFrame(step);
   }
 
-  // start
-  pedSteps = buildPedSteps();
-  pedIndex = 0;
-  enterPhase(PH.M1_G);
-  requestAnimationFrame(step);
-  window.addEventListener('resize', () => resizeCanvasToCSS());
+  // start (async init)  ✅ JSON 會在 enterPhase 前載入並套用到 UI
+  (async function init(){
+    try{
+      const cfg = await loadConfig();
+      applyConfigAndNormalize(cfg);
+    }catch(e){
+      console.warn('⚠️ Using default UI values (config not loaded):', e);
+    }
+
+    pedSteps = buildPedSteps();
+    pedIndex = 0;
+    enterPhase(PH.M1_G);
+    requestAnimationFrame(step);
+    window.addEventListener('resize', () => resizeCanvasToCSS());
+  })();
 })();
 </script>
 </body>
