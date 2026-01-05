@@ -41,14 +41,17 @@
       overflow:hidden;
     }
     .canvasWrap{ padding:12px; }
+
+    /* ✅ 重要：給 canvas 明確高度，避免 Pages / grid 下 height:auto 變 0 */
     canvas{
       width:100%;
-      height:auto;
+      height:600px;                 /* ⭐ 修正：讓畫面一定可見 */
       display:block;
       background: rgba(0,0,0,0.18);
       border-radius: 12px;
       border: 1px solid rgba(255,255,255,0.08);
     }
+
     .panel{ padding:14px; background: rgba(0,0,0,0.12); }
     h1{ font-size:16px; margin:0 0 10px 0; letter-spacing:.4px; }
     .pill{
@@ -105,7 +108,7 @@
 <body>
   <div class="wrap">
     <div class="card canvasWrap">
-      <canvas id="c" width="900" height="600"></canvas>
+      <canvas id="c"></canvas>
     </div>
 
     <div class="card panel">
@@ -222,37 +225,49 @@
     count: document.getElementById('count'),
   };
 
-  const W = canvas.width, H = canvas.height;
+  // ✅ 讓 canvas 的「繪圖尺寸」跟著 CSS 尺寸走（避免只看到背景）
+  function resizeCanvasToCSS() {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const rect = canvas.getBoundingClientRect();
 
-  // T geometry
-  const road = {
-    y: Math.round(H * 0.38),
-    h: 140,
-    x: Math.round(W * 0.52),
-    w: 150,
-  };
-  const intersection = {
-    x0: road.x - road.w/2,
-    x1: road.x + road.w/2,
-    y0: road.y - road.h/2,
-    y1: road.y + road.h/2,
-  };
+    const newW = Math.max(1, Math.round(rect.width * dpr));
+    const newH = Math.max(1, Math.round(rect.height * dpr));
+
+    if (canvas.width !== newW || canvas.height !== newH) {
+      canvas.width = newW;
+      canvas.height = newH;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // 用 CSS 像素繪圖
+    }
+  }
+
+  // Geometry computed from current canvas CSS size
+  function getGeom() {
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width;
+    const H = rect.height;
+
+    const road = {
+      y: Math.round(H * 0.38),
+      h: 140,
+      x: Math.round(W * 0.52),
+      w: 150,
+    };
+    const intersection = {
+      x0: road.x - road.w/2,
+      x1: road.x + road.w/2,
+      y0: road.y - road.h/2,
+      y1: road.y + road.h/2,
+    };
+    return { W, H, road, intersection };
+  }
 
   const SIG = { RED:'RED', YELLOW:'YELLOW', GREEN:'GREEN' };
 
-  // Phases
   const PH = {
-    A_G: 'A_G',
-    A_Y: 'A_Y',
-    AR1: 'AR1',
-    BL_G: 'BL_G',
-    BL_Y: 'BL_Y',
-    AR2: 'AR2',
-    BR_G: 'BR_G',
-    BR_Y: 'BR_Y',
-    AR3: 'AR3',
-    P_WALK: 'P_WALK',
-    AR4: 'AR4',
+    A_G: 'A_G', A_Y: 'A_Y', AR1: 'AR1',
+    BL_G: 'BL_G', BL_Y: 'BL_Y', AR2: 'AR2',
+    BR_G: 'BR_G', BR_Y: 'BR_Y', AR3: 'AR3',
+    P_WALK: 'P_WALK', AR4: 'AR4',
   };
 
   let phase = PH.A_G;
@@ -311,27 +326,21 @@
     }
   }
 
-  // Signals per phase:
-  // LR: R/Y/G
-  // Bottom main: show R/Y (green handled by arrows), arrows: L/R
-  // Ped: WALK only in P_WALK
   function signalsForPhase(ph){
     const allRed = { LR:SIG.RED, BMain:SIG.RED, BLeft:SIG.RED, BRight:SIG.RED, Ped:'STOP' };
 
-    if (ph === PH.P_WALK){
-      return { ...allRed, Ped:'WALK' };
-    }
+    if (ph === PH.P_WALK) return { ...allRed, Ped:'WALK' };
 
-    if (ph === PH.A_G) return { LR:SIG.GREEN, BMain:SIG.RED, BLeft:SIG.RED, BRight:SIG.RED, Ped:'STOP' };
-    if (ph === PH.A_Y) return { LR:SIG.YELLOW, BMain:SIG.RED, BLeft:SIG.RED, BRight:SIG.RED, Ped:'STOP' };
+    if (ph === PH.A_G) return { LR:SIG.GREEN,  BMain:SIG.RED, BLeft:SIG.RED,   BRight:SIG.RED,   Ped:'STOP' };
+    if (ph === PH.A_Y) return { LR:SIG.YELLOW, BMain:SIG.RED, BLeft:SIG.RED,   BRight:SIG.RED,   Ped:'STOP' };
 
-    if (ph === PH.BL_G) return { LR:SIG.RED, BMain:SIG.RED, BLeft:SIG.GREEN, BRight:SIG.RED, Ped:'STOP' };
-    if (ph === PH.BL_Y) return { LR:SIG.RED, BMain:SIG.RED, BLeft:SIG.YELLOW, BRight:SIG.RED, Ped:'STOP' };
+    if (ph === PH.BL_G) return { LR:SIG.RED, BMain:SIG.RED, BLeft:SIG.GREEN,  BRight:SIG.RED,   Ped:'STOP' };
+    if (ph === PH.BL_Y) return { LR:SIG.RED, BMain:SIG.RED, BLeft:SIG.YELLOW, BRight:SIG.RED,   Ped:'STOP' };
 
-    if (ph === PH.BR_G) return { LR:SIG.RED, BMain:SIG.RED, BLeft:SIG.RED, BRight:SIG.GREEN, Ped:'STOP' };
-    if (ph === PH.BR_Y) return { LR:SIG.RED, BMain:SIG.RED, BLeft:SIG.RED, BRight:SIG.YELLOW, Ped:'STOP' };
+    if (ph === PH.BR_G) return { LR:SIG.RED, BMain:SIG.RED, BLeft:SIG.RED,    BRight:SIG.GREEN, Ped:'STOP' };
+    if (ph === PH.BR_Y) return { LR:SIG.RED, BMain:SIG.RED, BLeft:SIG.RED,    BRight:SIG.YELLOW,Ped:'STOP' };
 
-    return allRed; // all-red buffers
+    return allRed;
   }
 
   function resetMachine(){
@@ -345,72 +354,64 @@
 
   function rnd(a,b){ return a + Math.random()*(b-a); }
 
-  function spawnCar(){
+  function spawnCar(geom){
     const p = Number(ui.spawn.value);
     if (Math.random() > p) return;
 
+    const { W, H, road } = geom;
     const r = Math.random();
+
     if (r < 0.38){
-      // left -> right (eastbound)
-      cars.push({ type:'LR', x:-40, y: road.y + 18, vx:rnd(90,130), vy:0, w:CAR_W, h:CAR_H, });
+      cars.push({ type:'LR', x:-40, y: road.y + 18, vx:rnd(90,130), vy:0, w:CAR_W, h:CAR_H });
     } else if (r < 0.76){
-      // right -> left (westbound)
-      cars.push({ type:'RL', x:W+40, y: road.y - 18, vx:-rnd(90,130), vy:0, w:CAR_W, h:CAR_H, });
+      cars.push({ type:'RL', x:W+40, y: road.y - 18, vx:-rnd(90,130), vy:0, w:CAR_W, h:CAR_H });
     } else {
-      // bottom -> turn left or right (must follow arrow phases)
       const turn = Math.random()<0.5 ? 'toL' : 'toR';
-      cars.push({
-        type:'B', turn,
-        x: road.x + 18, y:H+40,
-        vx:0, vy:-rnd(85,120),
-        w:CAR_H, h:CAR_W,
-        turned:false
-      });
+      cars.push({ type:'B', turn, x: road.x + 18, y:H+40, vx:0, vy:-rnd(85,120), w:CAR_H, h:CAR_W, turned:false });
     }
   }
 
-  function stopLineFor(car){
+  function stopLineFor(car, geom){
+    const { intersection } = geom;
     const margin = 20;
     if (car.type === 'LR') return intersection.x0 - margin;
     if (car.type === 'RL') return intersection.x1 + margin;
-    return intersection.y1 + margin; // bottom
+    return intersection.y1 + margin;
   }
 
-  function isPastStopLine(car){
-    if (car.type === 'LR') return car.x > stopLineFor(car);
-    if (car.type === 'RL') return car.x < stopLineFor(car);
-    return car.y < stopLineFor(car);
+  function isPastStopLine(car, geom){
+    const s = stopLineFor(car, geom);
+    if (car.type === 'LR') return car.x > s;
+    if (car.type === 'RL') return car.x < s;
+    return car.y < s;
   }
 
-  function willEnterIntersection(car){
-    if (car.type === 'LR') return car.x + car.w/2 >= stopLineFor(car) - 2;
-    if (car.type === 'RL') return car.x - car.w/2 <= stopLineFor(car) + 2;
-    return car.y - car.h/2 <= stopLineFor(car) + 2;
+  function willEnterIntersection(car, geom){
+    const s = stopLineFor(car, geom);
+    if (car.type === 'LR') return car.x + car.w/2 >= s - 2;
+    if (car.type === 'RL') return car.x - car.w/2 <= s + 2;
+    return car.y - car.h/2 <= s + 2;
   }
 
-  function canProceedForCar(car, sig){
-    // Green: go
-    // Yellow: if already past stop line, allow clearing; otherwise stop
-    // Red: stop if approaching
-    if (sig.Ped === 'WALK') return false; // all vehicles held during pedestrian
+  function canProceedForCar(car, sig, geom){
+    if (sig.Ped === 'WALK') return false;
 
     if (car.type === 'LR' || car.type === 'RL'){
       if (sig.LR === SIG.GREEN) return true;
-      if (sig.LR === SIG.YELLOW) return isPastStopLine(car); // clear only
+      if (sig.LR === SIG.YELLOW) return isPastStopLine(car, geom);
       return false;
     }
 
-    // Bottom: must follow its arrow (left/right)
     const arrow = (car.turn === 'toL') ? sig.BLeft : sig.BRight;
     if (arrow === SIG.GREEN) return true;
-    if (arrow === SIG.YELLOW) return isPastStopLine(car);
+    if (arrow === SIG.YELLOW) return isPastStopLine(car, geom);
     return false;
   }
 
-  function updateCars(dt, sig){
+  function updateCars(dt, sig, geom){
     for (const car of cars){
-      const approaching = willEnterIntersection(car) && !isPastStopLine(car);
-      const allowed = canProceedForCar(car, sig);
+      const approaching = willEnterIntersection(car, geom) && !isPastStopLine(car, geom);
+      const allowed = canProceedForCar(car, sig, geom);
       const shouldStop = approaching && !allowed;
 
       if (!shouldStop){
@@ -418,24 +419,25 @@
         car.y += car.vy * dt;
       }
 
-      // Turning for bottom cars at intersection
       if (car.type === 'B' && !car.turned){
+        const { road } = geom;
         if (car.y <= road.y + 10){
           car.turned = true;
           const sp = Math.abs(car.vy);
           if (car.turn === 'toL'){
             car.vx = -sp; car.vy = 0;
-            car.y = road.y - 18; // westbound lane
+            car.y = road.y - 18;
             car.w = CAR_W; car.h = CAR_H;
           } else {
             car.vx = sp; car.vy = 0;
-            car.y = road.y + 18; // eastbound lane
+            car.y = road.y + 18;
             car.w = CAR_W; car.h = CAR_H;
           }
         }
       }
     }
 
+    const { W, H } = geom;
     for (let i=cars.length-1; i>=0; i--){
       const car = cars[i];
       if (car.x < -140 || car.x > W+140 || car.y < -140 || car.y > H+140){
@@ -445,7 +447,7 @@
   }
 
   // Drawing helpers
-  function roundRect(x,y,w,h,r,fill,stroke){
+  function roundRect(x,y,w,h,r){
     ctx.beginPath();
     ctx.moveTo(x+r, y);
     ctx.arcTo(x+w, y, x+w, y+h, r);
@@ -453,13 +455,11 @@
     ctx.arcTo(x, y+h, x, y, r);
     ctx.arcTo(x, y, x+w, y, r);
     ctx.closePath();
-    if (fill) ctx.fill();
-    if (stroke) ctx.stroke();
   }
 
-  function dashedLine(x1,y1,x2,y2,dash,gap){
+  function dashedLine(x1,y1,x2,y2){
     ctx.save();
-    ctx.setLineDash([dash, gap]);
+    ctx.setLineDash([16, 10]);
     ctx.beginPath();
     ctx.moveTo(x1,y1);
     ctx.lineTo(x2,y2);
@@ -473,45 +473,38 @@
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     const stripe = 6, gap = 6;
     if (dir === 'vertical'){
-      for (let yy=y; yy<y+h; yy += stripe+gap){
-        ctx.fillRect(x, yy, w, stripe);
-      }
+      for (let yy=y; yy<y+h; yy += stripe+gap) ctx.fillRect(x, yy, w, stripe);
     } else {
-      for (let xx=x; xx<x+w; xx += stripe+gap){
-        ctx.fillRect(xx, y, stripe, h);
-      }
+      for (let xx=x; xx<x+w; xx += stripe+gap) ctx.fillRect(xx, y, stripe, h);
     }
     ctx.restore();
   }
 
-  function drawRoad(){
+  function drawRoad(geom){
+    const { W, H, road, intersection } = geom;
     ctx.clearRect(0,0,W,H);
 
-    // asphalt
     ctx.fillStyle = 'rgba(255,255,255,0.03)';
     ctx.fillRect(0, road.y-road.h/2, W, road.h);
     ctx.fillRect(road.x-road.w/2, road.y, road.w, H-road.y);
 
-    // lane lines
     ctx.strokeStyle = 'rgba(255,255,255,0.16)';
     ctx.lineWidth = 2;
-    dashedLine(0, road.y, W, road.y, 16, 10);
-    dashedLine(road.x, road.y, road.x, H, 16, 10);
+    dashedLine(0, road.y, W, road.y);
+    dashedLine(road.x, road.y, road.x, H);
 
-    // edges
     ctx.strokeStyle = 'rgba(255,255,255,0.10)';
     ctx.lineWidth = 3;
     ctx.strokeRect(0, road.y-road.h/2, W, road.h);
     ctx.strokeRect(road.x-road.w/2, road.y, road.w, H-road.y);
 
-    // zebra crossings: left, right across main; bottom across stem
     drawZebra(intersection.x0 - 55, road.y-road.h/2 + 8, 42, road.h-16, 'vertical');
     drawZebra(intersection.x1 + 13, road.y-road.h/2 + 8, 42, road.h-16, 'vertical');
     drawZebra(road.x-road.w/2 + 8, intersection.y1 + 14, road.w-16, 42, 'horizontal');
 
-    // stop lines
     ctx.strokeStyle = 'rgba(255,255,255,0.60)';
     ctx.lineWidth = 4;
+
     ctx.beginPath();
     ctx.moveTo(intersection.x0-20, road.y+road.h/2-6);
     ctx.lineTo(intersection.x0-20, road.y+6);
@@ -527,12 +520,11 @@
     ctx.lineTo(road.x+road.w/2-6, intersection.y1+20);
     ctx.stroke();
 
-    // labels
     ctx.fillStyle = 'rgba(232,238,252,0.75)';
     ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
     ctx.fillText('左來車 →', 18, road.y + 55);
     ctx.fillText('← 右來車', W-92, road.y - 45);
-    ctx.fillText('下方來車（左/右轉需箭頭）', road.x - 98, H-18);
+    ctx.fillText('下方來車（左/右轉需箭頭）', road.x - 110, H-18);
   }
 
   function lampColor(onColor, isOn){
@@ -540,11 +532,11 @@
   }
 
   function drawLight3(x,y,state){
-    // standard 3-lamp (R/Y/G)
     ctx.save();
     ctx.translate(x,y);
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    roundRect(-14,-26,28,52,8,true,false);
+    roundRect(-14,-26,28,52,8);
+    ctx.fill();
 
     const lamps = [
       { cy:-14, on: state===SIG.RED,    col:'rgba(255,70,70,1)' },
@@ -561,7 +553,6 @@
   }
 
   function drawArrowLamp(x,y,state,dir){
-    // arrow lamp (left/right), single circle with arrow glyph
     ctx.save();
     ctx.translate(x,y);
     ctx.beginPath();
@@ -590,29 +581,24 @@
   }
 
   function drawBottomSignal(x,y,main,left,right){
-    // Housing for bottom: 3 lamp + 2 arrow lamps
     ctx.save();
     ctx.translate(x,y);
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    roundRect(-18,-34,36,68,10,true,false);
+    roundRect(-18,-34,36,68,10);
+    ctx.fill();
 
-    // show red/yellow (main) in top/mid; green circle off (we mainly use arrows)
-    // top: red
     ctx.beginPath(); ctx.arc(0,-18,7,0,Math.PI*2);
     ctx.fillStyle = lampColor('rgba(255,70,70,1)', main===SIG.RED);
     ctx.fill();
 
-    // mid: yellow
     ctx.beginPath(); ctx.arc(0,0,7,0,Math.PI*2);
     ctx.fillStyle = lampColor('rgba(255,210,60,1)', main===SIG.YELLOW);
     ctx.fill();
 
-    // bottom: "green" indicator off (kept dim; arrows are the real permission)
     ctx.beginPath(); ctx.arc(0,18,7,0,Math.PI*2);
     ctx.fillStyle = 'rgba(255,255,255,0.10)';
     ctx.fill();
 
-    // arrows (left/right) placed beside mid
     drawArrowLamp(-12, 18, left, 'L');
     drawArrowLamp( 12, 18, right,'R');
 
@@ -623,7 +609,9 @@
     ctx.save();
     ctx.translate(x,y);
     ctx.fillStyle = 'rgba(0,0,0,0.42)';
-    roundRect(-16,-14,32,28,10,true,false);
+    roundRect(-16,-14,32,28,10);
+    ctx.fill();
+
     ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -636,7 +624,9 @@
     ctx.save();
     ctx.translate(x,y);
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    roundRect(-36,-18,72,36,12,true,false);
+    roundRect(-36,-18,72,36,12);
+    ctx.fill();
+
     ctx.fillStyle = 'rgba(232,238,252,0.95)';
     ctx.font = '16px ui-monospace, Menlo, Consolas, monospace';
     ctx.textAlign = 'center';
@@ -645,25 +635,21 @@
     ctx.restore();
   }
 
-  function drawSignals(sig){
-    // LR signals (two heads near stop lines)
+  function drawSignals(sig, geom){
+    const { road, intersection } = geom;
+
     const Lpos = { x: intersection.x0-34, y: road.y+road.h/2-30 };
     const Rpos = { x: intersection.x1+34, y: road.y-road.h/2+30 };
     drawLight3(Lpos.x, Lpos.y, sig.LR);
     drawLight3(Rpos.x, Rpos.y, sig.LR);
 
-    // bottom signal near stop line
     const Bpos = { x: road.x+road.w/2-26, y: intersection.y1+52 };
-    // bottom main: show RED when any vehicle held; show YELLOW during arrow yellow
-    // (for視覺清楚：若任一箭頭黃 -> main黃，若任一箭頭綠 -> main紅(因為直行不開放))
     let main = SIG.RED;
     if (sig.BLeft === SIG.YELLOW || sig.BRight === SIG.YELLOW) main = SIG.YELLOW;
     drawBottomSignal(Bpos.x, Bpos.y, main, sig.BLeft, sig.BRight);
 
-    // countdown
     drawCountdownBox(road.x - 34, road.y - 60, remaining);
 
-    // ped heads (3 locations)
     const walk = (sig.Ped === 'WALK');
     drawPedLight(intersection.x0 - 65, road.y - 70, walk);
     drawPedLight(intersection.x1 + 65, road.y + 70, walk);
@@ -675,7 +661,7 @@
       ctx.save();
       ctx.translate(car.x, car.y);
 
-      if (car.type === 'LR') { /* east */ }
+      if (car.type === 'LR') {}
       else if (car.type === 'RL') ctx.rotate(Math.PI);
       else if (car.type === 'B') ctx.rotate(-Math.PI/2);
 
@@ -692,7 +678,6 @@
     }
   }
 
-  // UI
   function phaseLabel(ph){
     switch(ph){
       case PH.A_G: return ['左右直行綠（A_G）', 'green'];
@@ -720,19 +705,69 @@
     ui.count.textContent = remaining;
   }
 
-  // Loop
   let running = true;
   let acc = 0;
   let last = performance.now();
 
   function step(now){
+    resizeCanvasToCSS();
+    const geom = getGeom();
+
     const dt = Math.min(0.05, (now - last)/1000);
     last = now;
 
     if (running){
       acc += dt;
-
-      // 1Hz phase countdown
       while (acc >= 1){
         acc -= 1;
         remaining -= 1;
+
+        if (remaining <= 0){
+          const d = getDur();
+          phase = nextPhase(phase);
+          remaining = durationForPhase(phase, d);
+        }
+      }
+      if (Math.random() < dt * 3.0) spawnCar(geom);
+    }
+
+    const sig = signalsForPhase(phase);
+    if (running) updateCars(dt, sig, geom);
+
+    drawRoad(geom);
+    drawSignals(sig, geom);
+    drawCars();
+    updateUI(sig);
+
+    requestAnimationFrame(step);
+  }
+
+  ui.toggle.addEventListener('click', () => {
+    running = !running;
+    ui.toggle.textContent = running ? '暫停' : '繼續';
+  });
+
+  ui.reset.addEventListener('click', () => {
+    cars.length = 0;
+    resetMachine();
+  });
+
+  function softApply(){
+    const d = getDur();
+    remaining = Math.min(remaining, durationForPhase(phase, d));
+  }
+  for (const el of [ui.tAG,ui.tAY,ui.tBLG,ui.tBLY,ui.tBRG,ui.tBRY,ui.tPW,ui.tR]){
+    el.addEventListener('change', softApply);
+  }
+
+  window.addEventListener('resize', () => {
+    resizeCanvasToCSS();
+  });
+
+  resetMachine();
+  resizeCanvasToCSS();
+  requestAnimationFrame(step);
+})();
+</script>
+</body>
+</html>
