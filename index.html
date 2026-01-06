@@ -565,51 +565,69 @@
     return true;
   }
 
-  function spawnCar(g){
-    const p = Number(ui.spawn.value);
-    if (Math.random() > p) return;
+function spawnCar(g){
+  const p = Number(ui.spawn.value);
+  if (Math.random() > p) return;
 
-    const r = Math.random();
-    const sp = rnd(95, 145);
+  const sp = rnd(95, 145);
 
-    if (r < 0.42){
-      const turnDown = (Math.random() < 0.30);
-      cars.push({
-        kind:'M1L',
-        route: turnDown ? 'down' : 'straight',
-        x: -80,
-        y: g.lane.m1_east_y,
-        vx: sp, vy: 0,
-        w: CAR_W, h: CAR_H,
-        turned: false,
-      });
-    } else if (r < 0.84){
-      const turnDown = (Math.random() < 0.55);
-      cars.push({
-        kind:'M1R',
-        route: turnDown ? 'down' : 'straight',
-        x: g.W + 80,
-        y: g.lane.m1_west_y,
-        vx: -sp, vy: 0,
-        w: CAR_W, h: CAR_H,
-        turned: false,
-      });
-    } else {
-      // M2: lane0 left-only, lane1 right-only
-      const laneIdx = (Math.random() < 0.58) ? 1 : 0;
-      const route = (laneIdx === 0) ? 'toLeft' : 'toRight';
-      cars.push({
-        kind:'M2',
-        laneIdx,
-        route,
-        x: g.lane.stem_in_x[laneIdx],
-        y: g.H + 90,
-        vx: 0, vy: -sp,
-        w: CAR_H, h: CAR_W,
-        turned: false,
-      });
-    }
+  // ✅ 需求排序：
+  // 1) 主1右側來車 M1R 左轉(=down)最多
+  // 2) 主2 M2 右轉(toRight)第二多
+  // 3) 主1左側來車 M1L 最少
+  //
+  // 三股總比例（可微調，但先用這組很穩）：
+  // - M1R: 55%
+  // - M2 : 35%
+  // - M1L: 10%
+  const r = Math.random();
+
+  if (r < 0.10){
+    // --- M1L 最少（左邊來車） ---
+    // 左來：少量右轉(往下)；其餘直行
+    const turnDown = (Math.random() < 0.20);
+    cars.push({
+      kind:'M1L',
+      route: turnDown ? 'down' : 'straight',
+      x: -80,
+      y: g.lane.m1_east_y,
+      vx: sp, vy: 0,
+      w: CAR_W, h: CAR_H,
+      turned: false,
+    });
+
+  } else if (r < 0.65){
+    // --- M1R 最高（右邊來車） ---
+    // 右來：左轉(往下)最多
+    const turnDown = (Math.random() < 0.80); // ✅ 右側左轉超高
+    cars.push({
+      kind:'M1R',
+      route: turnDown ? 'down' : 'straight',
+      x: g.W + 80,
+      y: g.lane.m1_west_y,
+      vx: -sp, vy: 0,
+      w: CAR_W, h: CAR_H,
+      turned: false,
+    });
+
+  } else {
+    // --- M2 第二高（下方來車） ---
+    // M2：右轉(toRight)偏多
+    const laneIdx = (Math.random() < 0.65) ? 1 : 0; // lane1 右轉專用，給多一點
+    const route = (laneIdx === 1) ? 'toRight' : 'toLeft';
+    cars.push({
+      kind:'M2',
+      laneIdx,
+      route,
+      x: g.lane.stem_in_x[laneIdx],
+      y: g.H + 90,
+      vx: 0, vy: -sp,
+      w: CAR_H, h: CAR_W,
+      turned: false,
+    });
   }
+}
+
 
   function allowedBySignal(car, sig, g){
     if (phase === PH.PSEQ){
