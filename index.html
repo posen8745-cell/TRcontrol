@@ -633,7 +633,13 @@ function spawnCar(g){
     if (phase === PH.PSEQ){
       return pedAllowsCar(car, sig);
     }
-
+    // ✅ 同放：主2 綠燈時，允許主1（右來）左轉往下同時通行
+// 主2 右轉(toRight)本來就會在 M2_G 放行，所以這樣就達成「主1左轉 + 主2右轉」同時
+if (phase === PH.M2_G){
+  if (car.kind === 'M1R' && car.route === 'down'){
+    return true;
+  }
+}
     // 主線1
     if (car.kind === 'M1L' || car.kind === 'M1R'){
       if (sig.m1 === SIG.YELLOW) return pastStop(car, g);
