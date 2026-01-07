@@ -108,6 +108,7 @@
       padding: 10px;
       background: rgba(0,0,0,0.16);
       margin-top: 10px;
+      transition: opacity .15s ease, filter .15s ease;
     }
     .grid2{
       display:grid;
@@ -139,7 +140,7 @@
       border: 1px solid rgba(255,255,255,0.10);
     }
 
-    /* ✅ 早上/晚上按鈕 */
+    /* ✅ 早上/晚上、右斑馬線 有/無 按鈕 */
     .modeBtns{
       display:flex;
       gap:10px;
@@ -162,6 +163,13 @@
       background: linear-gradient(180deg, rgba(60,255,140,0.18), rgba(0,0,0,0.10));
     }
     .modeBtn:disabled{opacity:.55; cursor:not-allowed; box-shadow:none}
+
+    /* ✅ 右斑馬線關閉時：灰掉整塊卡片 */
+    .subcard.disabled{
+      opacity: .45;
+      filter: grayscale(1);
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -173,8 +181,8 @@
     <div class="card panel">
       <h1>
         ✅ 順暢版：主線1「半重疊」（轉彎綠也放直行）＋✅ 排隊跟車（不穿越前車）<br/>
-        ✅ spawn 每秒制（不跟 FPS 綁定）＋✅ 行人 CLEAR 不降速（不拖垮車流）<br/>
-        ✅ 行人：左右 WALK 10 秒、下方 WALK 20 秒（CLEAR 依設定）<br/>
+        ✅ spawn 每秒制（不跟 FPS 綁定）＋✅ 行人 WALK/CLEAR 不再全域擋車（只擋衝突方向）<br/>
+        ✅ 行人：左/下固定（右可切換有/無）<br/>
         建議 spawn 0.18~0.25；≥0.35 仍可能超飽和。
       </h1>
 
@@ -200,6 +208,15 @@
       </div>
       <div class="tiny" id="manualHint" style="margin-top:6px;">
         手動：按下「早上/晚上」會直接套用（並自動關掉 Auto）。
+      </div>
+
+      <!-- ✅ 右斑馬線 有 / 無 -->
+      <div class="modeBtns" style="margin-top:10px;">
+        <button class="modeBtn" id="btnRightXwalkOn">有右斑馬線</button>
+        <button class="modeBtn" id="btnRightXwalkOff">無右斑馬線</button>
+      </div>
+      <div class="tiny" id="xwalkHint" style="margin-top:6px;">
+        右斑馬線：切換後會立刻影響行人序列（左→〔右可選〕→下）。
       </div>
 
       <div class="divider"></div>
@@ -238,8 +255,8 @@
 
       <div class="subcard">
         <div class="tiny">
-          行人序列：左→右→下（只跑你勾選的）。每條會跑 <code>WALK</code> 再跑 <code>CLEAR</code>。<br/>
-          CLEAR 期間：允許不衝突車流通行（此版不再全域降速）。
+          行人序列：左→（右可選）→下。每條會跑 <code>WALK</code> 再跑 <code>CLEAR</code>。<br/>
+          WALK/CLEAR 期間：只擋「衝突方向車流」，其他車流照走（避免全靜止）。
         </div>
 
         <div class="grid2">
@@ -251,7 +268,8 @@
             <div class="row"><label>CLEAR</label><input type="number" id="pLeftClr" min="2" max="30" value="6" /></div>
           </div>
 
-          <div class="subcard" style="margin:0;">
+          <!-- ✅ 右斑馬線卡片：可被整塊灰掉 -->
+          <div class="subcard" id="rightPedCard" style="margin:0;">
             <div class="checkrow">
               <label>右斑馬線</label><input type="checkbox" id="pRightOn" checked />
             </div>
@@ -273,7 +291,7 @@
           - 右主線左轉隊列最大 → AM（早上）<br/>
           - 主2右轉隊列最大 → PM2（晚上）<br/>
           - 其他 → MID（均衡）<br/><br/>
-          ※ 此版會固定維持行人設定避免被 autoMode 改走。
+          ※ 行人秒數固定（左 10/6、右 10/6、下 20/8），右斑馬線可切換「有/無」。
         </div>
       </div>
 
@@ -311,6 +329,8 @@
     pRightWalk: $('pRightWalk'), pRightClr: $('pRightClr'),
     pBottomWalk: $('pBottomWalk'), pBottomClr: $('pBottomClr'),
 
+    rightPedCard: $('rightPedCard'),
+
     autoMode: $('autoMode'),
     autoHint: $('autoHint'),
     qText: $('qText'),
@@ -318,6 +338,10 @@
     btnMorning: $('btnMorning'),
     btnEvening: $('btnEvening'),
     manualHint: $('manualHint'),
+
+    btnRightXwalkOn: $('btnRightXwalkOn'),
+    btnRightXwalkOff: $('btnRightXwalkOff'),
+    xwalkHint: $('xwalkHint'),
 
     toggle: $('toggle'), reset: $('reset'),
 
@@ -433,7 +457,35 @@
     return { W,H,road,inter,lane,stop,xwalk };
   }
 
-  // Ped sequence (left -> right -> bottom)
+  // ===== 右斑馬線 有/無 切換 =====
+  let rightXwalkEnabled = true;
+
+  function setRightXwalk(enabled){
+    rightXwalkEnabled = !!enabled;
+
+    // 勾選框跟著走（但右卡片可能被灰掉）
+    ui.pRightOn.checked = rightXwalkEnabled;
+
+    // 按鈕 active
+    ui.btnRightXwalkOn?.classList.toggle('active', rightXwalkEnabled);
+    ui.btnRightXwalkOff?.classList.toggle('active', !rightXwalkEnabled);
+
+    // 右卡片整塊灰掉 + disable
+    if (ui.rightPedCard){
+      ui.rightPedCard.classList.toggle('disabled', !rightXwalkEnabled);
+    }
+
+    // 立刻更新行人序列與 remaining
+    softApply();
+
+    if (ui.xwalkHint){
+      ui.xwalkHint.textContent = rightXwalkEnabled
+        ? '右斑馬線：目前「有」— 行人序列：左→右→下'
+        : '右斑馬線：目前「無」— 行人序列：左→下（跳過右）';
+    }
+  }
+
+  // Ped sequence (left -> (right optional) -> bottom)
   let pedSteps = [];
   let pedIndex = 0;
 
@@ -446,9 +498,18 @@
       steps.push({ key:`${name}_WALK`, dur:w });
       steps.push({ key:`${name}_CLEAR`, dur:c });
     };
+
+    // ✅ 左一定照勾選
     add('LEFT', ui.pLeftOn.checked, ui.pLeftWalk, ui.pLeftClr);
-    add('RIGHT', ui.pRightOn.checked, ui.pRightWalk, ui.pRightClr);
+
+    // ✅ 右：由 rightXwalkEnabled 決定「是否加入序列」
+    if (rightXwalkEnabled){
+      add('RIGHT', ui.pRightOn.checked, ui.pRightWalk, ui.pRightClr);
+    }
+
+    // ✅ 下照勾選
     add('BOTTOM', ui.pBottomOn.checked, ui.pBottomWalk, ui.pBottomClr);
+
     if (steps.length === 0) steps.push({ key:'NONE_CLEAR', dur: 2 });
     return steps;
   }
@@ -587,25 +648,24 @@
     return car.y - car.h/2 <= s + 2;
   }
 
-  // Ped conflict model
+  // ✅ 行人衝突：WALK/CLEAR 都只擋「衝突方向」，避免全靜止
   function pedAllowsCar(car, sig){
     if (phase !== PH.PSEQ) return true;
-    const which = sig.pedWhich;
-    const mode = sig.pedMode;
 
-    if (mode === 'WALK') return false;
-    if (mode !== 'CLEAR') return false;
+    const which = sig.pedWhich;  // LEFT / RIGHT / BOTTOM
+    const mode  = sig.pedMode;   // WALK / CLEAR / NONE
 
-    if (which === 'LEFT' && car.kind === 'M1L') return false;
-    if (which === 'RIGHT' && car.kind === 'M1R') return false;
-    if (which === 'BOTTOM' && car.kind === 'M2') return false;
+    if (mode === 'NONE') return true;
+
+    if (which === 'LEFT'   && car.kind === 'M1L') return false;
+    if (which === 'RIGHT'  && car.kind === 'M1R') return false;
+    if (which === 'BOTTOM' && car.kind === 'M2')  return false;
 
     return true;
   }
 
   // ===== Auto Mode + 手動早晚按鈕 =====
   const MODES = {
-    // ✅ 綠燈更長（你說車行時間過短）
     AM:  { name:'早上（右主線左轉40% / 主2右轉30%）', M1_SG: 22, M1_TG: 40, M2_G: 34, spawn: 0.22 },
     MID: { name:'平峰（均衡）',                         M1_SG: 26, M1_TG: 28, M2_G: 38, spawn: 0.20 },
     PM2: { name:'晚上（主2右轉40% / 右主線左轉30%）',   M1_SG: 20, M1_TG: 28, M2_G: 55, spawn: 0.22 },
@@ -616,21 +676,19 @@
   const MIN_HOLD_SEC = 60;
   const SWITCH_MARGIN = 3;
 
-  function setButtonActive(modeKey){
-    if (!ui.btnMorning || !ui.btnEvening) return;
-    ui.btnMorning.classList.toggle('active', modeKey === 'AM');
-    ui.btnEvening.classList.toggle('active', modeKey === 'PM2');
-    // MID 時兩顆都不亮（表示不是手動早/晚）
+  function setModeButtonActive(modeKey){
+    ui.btnMorning?.classList.toggle('active', modeKey === 'AM');
+    ui.btnEvening?.classList.toggle('active', modeKey === 'PM2');
     if (modeKey === 'MID'){
-      ui.btnMorning.classList.remove('active');
-      ui.btnEvening.classList.remove('active');
+      ui.btnMorning?.classList.remove('active');
+      ui.btnEvening?.classList.remove('active');
     }
   }
 
   function syncModeControls(){
     const autoOn = !!ui.autoMode?.checked;
-    if (ui.btnMorning) ui.btnMorning.disabled = autoOn;
-    if (ui.btnEvening) ui.btnEvening.disabled = autoOn;
+    ui.btnMorning && (ui.btnMorning.disabled = autoOn);
+    ui.btnEvening && (ui.btnEvening.disabled = autoOn);
     if (ui.manualHint){
       ui.manualHint.textContent = autoOn
         ? '手動：Auto 開啟中（早上/晚上按鈕已鎖定）'
@@ -647,12 +705,11 @@
     ui.tM2G.value  = m.M2_G;
     ui.spawn.value = m.spawn;
 
-    // ✅ 行人固定配置（維持你原本設定）
+    // ✅ 行人秒數固定（不強制開關右斑馬線）
     ui.pLeftOn.checked = true;
     ui.pLeftWalk.value = 10;
     ui.pLeftClr.value  = 6;
 
-    ui.pRightOn.checked = true;
     ui.pRightWalk.value = 10;
     ui.pRightClr.value  = 6;
 
@@ -665,8 +722,7 @@
     currentAutoMode = modeKey;
     modeHoldSec = 0;
 
-    setButtonActive(modeKey);
-
+    setModeButtonActive(modeKey);
     if (ui.autoHint) ui.autoHint.textContent = `Auto：目前模式 ${modeKey}｜${m.name}`;
   }
 
@@ -715,14 +771,13 @@
 
     const sp = rnd(95, 145);
 
-    // ✅ 依「目前模式」套用你的早晚比例（其餘流量自動分到其他車流）
+    // ✅ 依目前模式套用早晚比例
     let base = { m1rLeft: 0.35, m2Right: 0.35, others: 0.30 };
     if (currentAutoMode === 'AM')  base = { m1rLeft: 0.40, m2Right: 0.30, others: 0.30 };
     if (currentAutoMode === 'PM2') base = { m1rLeft: 0.30, m2Right: 0.40, others: 0.30 };
 
     const r = Math.random();
 
-    // 1) 右主線左轉（M1R down）
     if (r < base.m1rLeft){
       cars.push({
         kind:'M1R',
@@ -736,7 +791,6 @@
       return;
     }
 
-    // 2) 主2右轉（M2 toRight，右轉 lane）
     if (r < base.m1rLeft + base.m2Right){
       cars.push({
         kind:'M2',
@@ -751,7 +805,6 @@
       return;
     }
 
-    // 3) others：右主線直行 / 主2左轉 / 左主線少量
     const rr = Math.random();
     if (rr < 0.50){
       cars.push({
@@ -871,7 +924,7 @@
       for (let i=1; i<arr.length; i++){
         const leader = arr[i-1];
         const follower = arr[i];
-        const gap = backS(leader) - frontS(follower);
+        const gap = (sCoord(leader) - lenAlong(leader)/2) - (sCoord(follower) + lenAlong(follower)/2);
         if (gap < SAFE_GAP){
           follower.__needStop = true;
         }
@@ -885,6 +938,7 @@
       }
 
       if (!car.turned){
+        // 主線1 往下轉
         if ((car.kind === 'M1L' || car.kind === 'M1R') && car.route === 'down'){
           const turnX = g.road.x;
           if ((car.kind==='M1L' && car.x >= turnX) || (car.kind==='M1R' && car.x <= turnX)){
@@ -896,6 +950,7 @@
           }
         }
 
+        // 主線2 轉入主線1
         if (car.kind === 'M2'){
           if (car.y <= g.road.y + 10){
             car.turned = true;
@@ -1174,8 +1229,6 @@
   let running = true;
   let acc = 0;
   let last = performance.now();
-
-  // ✅ spawn 每秒制
   let spawnAcc = 0;
 
   function softApply(){
@@ -1191,31 +1244,30 @@
   function applyConfigAndNormalize(cfg){
     applyConfigToUI(cfg);
 
-    // ✅ 依你原本固定行人
+    // ✅ 行人秒數固定
     ui.pLeftOn.checked = true;  ui.pLeftWalk.value = 10; ui.pLeftClr.value = 6;
-    ui.pRightOn.checked = true; ui.pRightWalk.value = 10; ui.pRightClr.value = 6;
+    ui.pRightWalk.value = 10;   ui.pRightClr.value = 6;
     ui.pBottomOn.checked = true;ui.pBottomWalk.value = 20;ui.pBottomClr.value = 8;
 
     softApply();
   }
 
+  // ===== 事件：參數調整 =====
   for (const el of [
     ui.tM1SG, ui.tM1TG, ui.tM1Y, ui.tM2G, ui.tM2Y, ui.tAR, ui.spawn,
-    ui.pLeftOn,ui.pRightOn,ui.pBottomOn,
-    ui.pLeftWalk,ui.pLeftClr,ui.pRightWalk,ui.pRightClr,ui.pBottomWalk,ui.pBottomClr,
+    ui.pLeftOn, ui.pBottomOn,
+    ui.pLeftWalk, ui.pLeftClr, ui.pRightWalk, ui.pRightClr, ui.pBottomWalk, ui.pBottomClr,
     ui.autoMode
   ]) el.addEventListener('change', softApply);
 
   ui.autoMode?.addEventListener('change', () => {
-    // Auto 打開時：把按鈕鎖住
     if (ui.autoMode.checked){
-      // 讓 Auto 狀態下也能看得出目前模式（若是 MID 兩顆不亮也正常）
-      setButtonActive(currentAutoMode);
+      setModeButtonActive(currentAutoMode);
     }
     syncModeControls();
   });
 
-  // ✅ 手動按鈕：按下就套用、並關掉 Auto
+  // ✅ 手動早晚：按下就套用並關 Auto
   ui.btnMorning?.addEventListener('click', () => {
     ui.autoMode.checked = false;
     applyMode('AM');
@@ -1226,6 +1278,13 @@
     applyMode('PM2');
     syncModeControls();
   });
+
+  // ✅ 右斑馬線 有/無：一鍵切換
+  ui.btnRightXwalkOn?.addEventListener('click', () => setRightXwalk(true));
+  ui.btnRightXwalkOff?.addEventListener('click', () => setRightXwalk(false));
+
+  // （右卡片灰掉時會禁用互動，所以這個不會跟按鈕打架）
+  ui.pRightOn?.addEventListener('change', () => setRightXwalk(ui.pRightOn.checked));
 
   ui.toggle.addEventListener('click', () => {
     running = !running;
@@ -1268,7 +1327,7 @@
     requestAnimationFrame(step);
   }
 
-  // start (async init)
+  // ===== start =====
   (async function init(){
     try{
       const cfg = await loadConfig();
@@ -1277,19 +1336,23 @@
       console.warn('⚠️ Using default UI values (config not loaded):', e);
     }
 
-    // ✅ 行人固定（再保險一次）
+    // ✅ 行人秒數固定（再保險一次）
     ui.pLeftOn.checked = true;  ui.pLeftWalk.value = 10; ui.pLeftClr.value = 6;
-    ui.pRightOn.checked = true; ui.pRightWalk.value = 10; ui.pRightClr.value = 6;
+    ui.pRightWalk.value = 10;   ui.pRightClr.value = 6;
     ui.pBottomOn.checked = true;ui.pBottomWalk.value = 20;ui.pBottomClr.value = 8;
+
+    // ✅ 預設：平峰
+    applyMode('MID');
+
+    // ✅ 預設：有右斑馬線（你要預設無就改 false）
+    setRightXwalk(true);
 
     pedSteps = buildPedSteps();
     pedIndex = 0;
 
-    // ✅ 預設先套平峰（MID）
-    applyMode('MID');
-
     enterPhase(PH.M1S_G);
     syncModeControls();
+
     requestAnimationFrame(step);
     window.addEventListener('resize', () => resizeCanvasToCSS());
   })();
